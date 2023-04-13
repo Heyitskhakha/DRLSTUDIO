@@ -1,0 +1,142 @@
+# This script demonstrates the editable custom pallet with CheckApp HMI panel on robot teach pendant.
+
+from DRCF import *
+import powerup.easypallet as easypallet
+import powerup.checkapp as checkapp
+import powerup.motion as motion
+
+# constants
+BEGIN = "BEGIN"
+LAST = "LAST STATUS"
+BOX = "BOX NUMBER"
+
+PALLET_FRAME = 101
+APPROACH = posx(50, 50, 80, 0, 0, 0)
+RETRACT = posx(0, 0, 50, 0, 0, 0)
+
+HOME_POSE = posj(86.0, 21.0, 82.3, 0.4, 75.9, 85.8)
+UP_PALLET_POSE = posj(-5.5, 21.0, 82.3, 0.4, 75.9, 85.8)
+
+# variables
+selected_task = ""
+start_layer = 1
+start_box = 1
+
+# hmi variables
+hmi_pallet_tasks = easypallet.get_pallet_projects()
+hmi_selected_task = None
+hmi_start_options = [BEGIN, LAST, BOX]
+hmi_selected_start_option = None
+hmi_layer = 0
+hmi_box = 0
+hmi_status = ""
+hmi_p1 = None
+hmi_p2 = None
+hmi_p3 = None
+hmi_pick = None
+hmi_l = None
+hmi_w = None
+hmi_h = None
+
+
+
+# hmi functions
+def hmi_delete_pallet_project():
+    if checkapp.hmi_yes_no_user_input("Delete Pallet project", "Do you want to permanently delete project "+str(hmi_selected_task)+"?") == 0:
+        easypallet.delete_pallet_project(hmi_selected_task)
+
+
+def hmi_update_status(status):
+    global hmi_status
+    hmi_status = status
+    tp_log(hmi_status)
+
+
+# setup tools
+PALLET_FRAME = 101
+#set tool
+set_tool("Tool Weight j")
+set_tcp("GripperSA_v1")
+
+
+# setup grasp and release functions
+def grasp_function():
+    set_digital_output(7, ON)
+    wait(1)
+
+
+def release_function():
+    set_digital_output(7, OFF)
+    wait(1)
+
+
+
+# define a tool to be used for palletizing
+vacuum_tool = motion.define_tool(grasp_action=grasp_function, release_action=release_function)
+motion.set_current_tool(vacuum_tool)
+
+# motion parameters
+set_velx(250)
+set_accx(200)
+set_velj(40)
+set_accj(40)
+
+
+# motion functions
+@motion.Stoppable
+def start_task():
+    if selected_task is None or selected_task == "":
+        hmi_update_status("SELECT PALLET TASK")
+        return
+
+    # create custom pallet instance
+    pallet = easypallet.CustomPallet(selected_task)
+
+    # calibrate pallet with calibration data
+    #pallet.calibrate(hmi_p1, hmi_p2, hmi_p3, hmi_l, hmi_w, hmi_h, hmi_pick)
+
+    # configure starting condition
+    if hmi_selected_start_option == LAST:
+        pallet.load_state()
+    elif hmi_selected_start_option == BOX:
+        pallet.start_from(hmi_layer-1, hmi_box-1)
+
+    # execute palletizing
+    for pose in pallet:
+        hmi_update_status("COUNT = {} / {}, LAYER = {}, BOX= {}".format(pallet.get_current_count()+1, pallet.get_total_count(), pallet.get_current_layer()+1, pallet.get_current_box()+1))
+
+        # go to home
+        movej(HOME_POSE, r=20)
+
+        # pick
+        #tp_log(str(pallet.get_pick_pose()))
+        #motion.pick(pallet.get_pick_pose(), wait_time=0.1, r=20)
+        motion.pick(posx(47.3, 1215.9, -35.6, 95.1, 179.3, 95.1), offset=[0, 0, -400], wait_time=0)
+        # go up pallet
+        #movej(UP_PALLET_POSE, r=20)
+
+        # start palletizing mode
+        #set_palletizing_mode(DR_ON)
+
+        # place
+        motion.place(pose, approach=posx(30, 30, 800, 0, 0, 0), wait_time=0, ref=PALLET_FRAME)
+
+        # save pallet status
+        pallet.save_state()
+
+        # deactivate palletizing mode
+        #set_palletizing_mode(DR_OFF)
+
+        # go up pallet
+        movej(UP_PALLET_POSE, r=20)
+
+
+def stop_task():
+    hmi_update_status("TASK STOPPED")
+    motion.stop_motion()
+
+
+# initialize smart HMI with name of hmi file to use.
+checkapp.hmi_init("hmi_custom_pallet", collapsed=False)
+checkapp.wait_hmi()
+checkapp.hmi_start_loop()
